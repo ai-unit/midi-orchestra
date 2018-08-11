@@ -1,5 +1,4 @@
 import argparse
-import glob
 import os
 
 import librosa.display
@@ -14,8 +13,8 @@ START_PITCH = 0
 END_PITCH = 127
 
 # Size of the diagram
-WIDTH = 12
-HEIGHT = 8
+WIDTH = 17
+HEIGHT = 12
 
 # Analysis sample rate
 RESOLUTION = 100
@@ -34,6 +33,7 @@ def generate_piano_roll(score, title, path, start_pitch, end_pitch,
                              x_axis='time', y_axis='cqt_note',
                              fmin=midi.note_number_to_hz(start_pitch))
 
+    plt.tight_layout()
     plt.savefig(path)
 
 
@@ -86,8 +86,7 @@ def main():
 
     args = parser.parse_args()
 
-    file_paths = (
-        glob.glob(args.files) if isinstance(args.files, str) else args.files)
+    file_paths = common.get_files(args.files)
 
     height = args.height
     pitch_end = args.pitch_end
@@ -99,23 +98,10 @@ def main():
     if pitch_end < pitch_start:
         common.print_error('Error: Pitch range is smaller than 0!')
 
-    if len(file_paths) == 0:
-        common.print_error(
-            'Error: Could not find any files with this pattern.')
-
-    if not os.path.isdir(target_folder_path):
-        print('Create target folder at "{}".'.format(target_folder_path))
-        os.makedirs(target_folder_path)
+    common.check_target_folder(target_folder_path)
 
     for file_path in file_paths:
-        if not os.path.isfile(file_path):
-            print('Warning: "{}" could not be found or is a folder '
-                  'Ignore it!\n'.format(file_path))
-            continue
-
-        if not file_path.endswith('.mid'):
-            print('Warning: File "{}" does not end with ".mid". '
-                  'Ignore it!\n'.format(file_path))
+        if common.is_invalid_file(file_path):
             continue
 
         # Read MIDi file and clean up
@@ -125,8 +111,9 @@ def main():
 
         # Generate piano roll images
         base_name = os.path.splitext(os.path.basename(file_path))[0]
-        plot_file_name = '{}.png'.format(base_name)
-        plot_file_path = os.path.join(target_folder_path, plot_file_name)
+        plot_file_path = common.make_file_path(file_path,
+                                               target_folder_path,
+                                               ext='png')
 
         generate_piano_roll(score, base_name, plot_file_path,
                             pitch_start, pitch_end,

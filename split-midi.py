@@ -1,7 +1,5 @@
 import argparse
-import glob
 import math
-import os
 
 import pretty_midi as midi
 
@@ -128,7 +126,7 @@ def split_score(score, split_every_sec):
     return splits
 
 
-def generate_files(base_name, target_folder, splits):
+def generate_files(file_path, target_folder, splits):
     """Saves multiple splitted MIDI files in a folder."""
 
     for split_index, split in enumerate(splits):
@@ -138,8 +136,9 @@ def generate_files(base_name, target_folder, splits):
         split_score.instruments = split['instruments']
 
         # Save MIDI file
-        split_file_name = '{}-split-{}.mid'.format(base_name, split_index + 1)
-        split_file_path = os.path.join(target_folder, split_file_name)
+        split_file_path = common.make_file_path(
+            file_path, target_folder,
+            suffix='split-{}'.format(split_index + 1))
         split_score.write(split_file_path)
 
         print('Saved MIDI file at "{}".'.format(split_file_path))
@@ -170,28 +169,15 @@ def main():
 
     args = parser.parse_args()
 
-    file_paths = (
-        glob.glob(args.files) if isinstance(args.files, str) else args.files)
+    file_paths = common.get_files(args.files)
+
     target_folder_path = args.target_folder
     duration = args.duration
 
-    if len(file_paths) == 0:
-        common.print_error(
-            'Error: Could not find any files with this pattern.')
-
-    if not os.path.isdir(target_folder_path):
-        print('Create target folder at "{}".'.format(target_folder_path))
-        os.makedirs(target_folder_path)
+    common.check_target_folder(target_folder_path)
 
     for file_path in file_paths:
-        if not os.path.isfile(file_path):
-            print('Warning: "{}" could not be found or is a folder '
-                  'Ignore it!'.format(file_path))
-            continue
-
-        if not file_path.endswith('.mid'):
-            print('Warning: File "{}" does not end with ".mid". '
-                  'Ignore it!'.format(file_path))
+        if common.is_invalid_file(file_path):
             continue
 
         # Read MIDi file and clean up
@@ -203,8 +189,7 @@ def main():
         splits = split_score(score, duration)
 
         # Generate MIDI files from splits
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        generate_files(base_name, target_folder_path, splits)
+        generate_files(file_path, target_folder_path, splits)
 
         print('')
 

@@ -1,7 +1,5 @@
 import argparse
-import glob
 import math
-import os
 
 import music21 as mc
 import numpy as np
@@ -373,8 +371,7 @@ def main():
 
     args = parser.parse_args()
 
-    file_paths = (
-        glob.glob(args.files) if isinstance(args.files, str) else args.files)
+    file_paths = common.get_files(args.files)
 
     default_clef = args.clef
     default_instrument = args.instrument
@@ -400,23 +397,10 @@ def main():
         common.print_error('Error: length of voice distribution is not '
                            'equals the number of voices!')
 
-    if len(file_paths) == 0:
-        common.print_error(
-            'Error: Could not find any files with this pattern.')
-
-    if not os.path.isdir(target_folder_path):
-        print('Create target folder at "{}".'.format(target_folder_path))
-        os.makedirs(target_folder_path)
+    common.check_target_folder(target_folder_path)
 
     for file_path in file_paths:
-        if not os.path.isfile(file_path):
-            print('Warning: "{}" could not be found or is a folder '
-                  'Ignore it!'.format(file_path))
-            continue
-
-        if not file_path.endswith('.mid'):
-            print('Warning: File "{}" does not end with ".mid". '
-                  'Ignore it!'.format(file_path))
+        if common.is_invalid_file(file_path):
             continue
 
         # Import MIDI file
@@ -548,9 +532,9 @@ def main():
                   ((new_measures_total / measures_total) - 1) * 100))
 
         # Write result to MIDI file
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        new_file_name = '{}-processed.mid'.format(base_name)
-        new_file_path = os.path.join(target_folder_path, new_file_name)
+        new_file_path = common.make_file_path(file_path,
+                                              target_folder_path,
+                                              suffix='processed')
 
         file = mc.midi.translate.streamToMidiFile(new_score)
         file.open(new_file_path, 'wb')
