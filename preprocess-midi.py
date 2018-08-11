@@ -131,6 +131,20 @@ def identify_ambitus_groups(score, voice_num, voice_distribution):
 
         part_groups.append(group_index)
         groups_count[group_index] += 1
+
+    groups_count = np.array(groups_count)
+
+    # 5. Fill up empty spaces
+    while len(np.where(groups_count == 0)[0]) > 0:
+        empty_group_index = np.where(groups_count == 0)[0][0]
+        full_group_index = np.argmax(groups_count)
+        part_index = np.argwhere(part_groups == full_group_index).flatten()[0]
+        part_groups[part_index] = empty_group_index
+        groups_count[empty_group_index] += 1
+        groups_count[full_group_index] -= 1
+        print('Empty group {} detected, fill it up with part {}!'.format(
+            empty_group_index, part_index))
+
     print('Parts in groups:', part_groups)
 
     return np.array(part_groups)
@@ -423,6 +437,14 @@ def main():
         remove_sparse_parts(score,
                             score_part_ratio)
 
+        # Check if we still have enough parts to go on
+        if len(score) < voice_num:
+            print(
+                'Warning: Less parts than needed voices! '
+                'Cancel process here!')
+            print('')
+            continue
+
         # Identify ambitus group for every part
         part_groups = identify_ambitus_groups(score,
                                               voice_num,
@@ -430,22 +452,11 @@ def main():
 
         # Check which parts we can combine
         combination_options = []
-        is_cancelled = False
         for group_index in range(0, voice_num):
             options = np.argwhere(part_groups == group_index).flatten()
             combination_options.append(options)
             print('Parts {} in group {} (size = {}).'.format(
                 options, group_index, len(options)))
-            if len(options) == 0:
-                print(
-                    'Warning: Empty combination group detected! '
-                    'Too little parts? Cancel process here!')
-                is_cancelled = True
-                break
-
-        if is_cancelled:
-            print('')
-            continue
 
         # Build a tree to traverse to find all combinations
         tree = create_combination_tree(combination_options, 0)
