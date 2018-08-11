@@ -2,10 +2,7 @@ import argparse
 import glob
 import math
 import os
-import sys
 
-import librosa.display
-import matplotlib.pyplot as plt
 import pretty_midi as midi
 
 import common
@@ -131,27 +128,8 @@ def split_score(score, split_every_sec):
     return splits
 
 
-def generate_piano_roll(score, title, path=None,
-                        start_pitch=0, end_pitch=127, fs=100):
-    """Save a piano roll image."""
-
-    plt.figure()
-    plt.figure(figsize=(12, 8))
-    plt.title(title)
-
-    librosa.display.specshow(score.get_piano_roll(fs)[start_pitch:end_pitch],
-                             hop_length=1, sr=fs,
-                             x_axis='time', y_axis='cqt_note',
-                             fmin=midi.note_number_to_hz(start_pitch))
-
-    plt.savefig(path)
-
-
 def generate_files(base_name, target_folder, splits):
-    """
-    Saves multiple splitted MIDI files and its
-    piano roll plots in a folder.
-    """
+    """Saves multiple splitted MIDI files in a folder."""
 
     for split_index, split in enumerate(splits):
         split_score = midi.PrettyMIDI()
@@ -159,22 +137,12 @@ def generate_files(base_name, target_folder, splits):
         split_score.key_signature_changes = split['key_signature_changes']
         split_score.instruments = split['instruments']
 
-        # Save MIDI file and piano roll plot
+        # Save MIDI file
         split_file_name = '{}-split-{}.mid'.format(base_name, split_index + 1)
         split_file_path = os.path.join(target_folder, split_file_name)
-
-        plot_file_name = '{}-split-{}.png'.format(base_name, split_index + 1)
-        plot_file_path = os.path.join(target_folder, plot_file_name)
-
-        generate_piano_roll(split_score, split_file_name, plot_file_path)
-
-        # Free pyplot memory
-        plt.close('all')
-
         split_score.write(split_file_path)
 
-        print('Saved MIDI file and piano roll plot at "{}".'.format(
-            split_file_path))
+        print('Saved MIDI file at "{}".'.format(split_file_path))
 
 
 def main():
