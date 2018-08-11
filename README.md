@@ -27,6 +27,21 @@ optional arguments:
 ```
 
 ```
+$ python separate-midi.py -h
+usage: separate-midi.py [-h] [--target_folder path]
+                        path [path ...]
+
+Separate all voices from a MIDI file into parts.
+
+positional arguments:
+  path                  path of input files (.mid). accepts * as wildcard
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --target_folder path  folder path where generated results are stored
+```
+
+```
 $ python preprocess-midi.py -h
 usage: preprocess-midi.py [-h] [--target_folder path] [--interval_note note]
                           [--interval_low 0-8] [--interval_high 0-8]
