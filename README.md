@@ -28,7 +28,7 @@ optional arguments:
 
 ```
 $ python separate-midi.py -h
-usage: separate-midi.py [-h] [--target_folder path]
+usage: separate-midi.py [-h] [--target_folder path] [--instrument name]
                         path [path ...]
 
 Separate all voices from a MIDI file into parts.
@@ -39,6 +39,7 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
   --target_folder path  folder path where generated results are stored
+  --instrument name     converts parts to given instrument
 ```
 
 ```
