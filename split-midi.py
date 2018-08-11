@@ -8,9 +8,10 @@ import librosa.display
 import matplotlib.pyplot as plt
 import pretty_midi as midi
 
+import common
+
 
 DEFAULT_DURATION = 60
-DEFAULT_TARGET_FOLDER = './generated/'
 
 
 def find_elements_in_range(elements, start_time, end_time):
@@ -177,31 +178,38 @@ def generate_files(base_name, target_folder, splits):
 
 
 def main():
-    """Split MIDI files into shorter sequences."""
+    """User interface."""
 
     parser = argparse.ArgumentParser(
-        description='Split MIDI files into shorter sequences.')
+        description='Helper script to split MIDI files into '
+                    'shorter sequences by a fixed duration.')
     parser.add_argument('files',
                         metavar='path',
-                        help='Path of input files. '
-                             'Accepts * as wildcard, use quotes.')
+                        nargs='+',
+                        help='path of input files (.mid). '
+                             'accepts * as wildcard')
     parser.add_argument('--target_folder',
-                        help='Folder path where '
-                             'generated results are stored.',
-                        default=DEFAULT_TARGET_FOLDER)
+                        metavar='path',
+                        help='folder path where '
+                             'generated results are stored',
+                        default=common.DEFAULT_TARGET_FOLDER)
     parser.add_argument('--duration',
-                        help='Duration of every slice in seconds.',
+                        metavar='seconds',
+                        type=int,
+                        help='duration of every slice in seconds',
+                        choices=range(1, 60 * 60),
                         default=DEFAULT_DURATION)
 
     args = parser.parse_args()
 
-    file_paths = glob.glob(args.files)
+    file_paths = (
+        glob.glob(args.files) if isinstance(args.files, str) else args.files)
     target_folder_path = args.target_folder
     duration = args.duration
 
     if len(file_paths) == 0:
-        print('Error: Could not find any files with this pattern.')
-        sys.exit(1)
+        common.print_error(
+            'Error: Could not find any files with this pattern.')
 
     if not os.path.isdir(target_folder_path):
         print('Create target folder at "{}".'.format(target_folder_path))
@@ -209,9 +217,13 @@ def main():
 
     for file_path in file_paths:
         if not os.path.isfile(file_path):
+            print('Warning: "{}" could not be found or is a folder '
+                  'Ignore it!'.format(file_path))
             continue
 
         if not file_path.endswith('.mid'):
+            print('Warning: File "{}" does not end with ".mid". '
+                  'Ignore it!'.format(file_path))
             continue
 
         # Read MIDi file and clean up
