@@ -1,2 +1,6 @@
+# environment
 .python-version
+__pycache__
+
+# user content
 generated
