@@ -228,15 +228,18 @@ def clean_copy_element(element, note, low, high):
     return new_element
 
 
-def create_default_part(instrument, time_signature, clef):
+def create_default_part(instrument, time_signature, clef, is_first=False):
     """Creates a default part."""
 
     part = mc.stream.Part()
 
-    # Set default instrument, time signature and clef
+    # Set default instrument and clef
     part.insert(0, mc.instrument.fromString(instrument))
-    part.insert(0, mc.meter.TimeSignature(time_signature))
     part.insert(0, mc.clef.clefFromString(clef))
+
+    # Only give time signature info for first track (MIDI standard)
+    if is_first:
+        part.insert(0, mc.meter.TimeSignature(time_signature))
 
     return part
 
@@ -473,7 +476,8 @@ def main():
         for part_index, part in enumerate(score):
             new_part = create_default_part(default_instrument,
                                            default_time_signature,
-                                           default_clef)
+                                           default_clef,
+                                           is_first=(part_index == 0))
 
             # Get group this part belongs to
             group_index = part_groups[part_index]
@@ -508,7 +512,8 @@ def main():
         for i in range(0, voice_num):
             new_part = create_default_part(default_instrument,
                                            default_time_signature,
-                                           default_clef)
+                                           default_clef,
+                                           is_first=(i == 0))
             new_score.insert(0, new_part)
 
         # Add parts in all possible combinations
