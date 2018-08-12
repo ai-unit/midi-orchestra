@@ -200,14 +200,15 @@ def traverse_combination_tree(tree, single_combination=[], result=[], depth=0):
     return result
 
 
-def generate_note_from_pitch(old_pitch, note, low, high):
+def generate_note_from_pitch(old_pitch,
+                             interval_note, interval_low, interval_high):
     """Take a pitch object, transpose and generate a new note from it."""
 
     # Fit within interval range
     new_pitch = old_pitch.transposeAboveTarget(
-        mc.pitch.Pitch(name=note, octave=low))
+        mc.pitch.Pitch(name=interval_note, octave=interval_low))
     new_pitch = new_pitch.transposeBelowTarget(
-        mc.pitch.Pitch(name=note, octave=high))
+        mc.pitch.Pitch(name=interval_note, octave=interval_high))
 
     # Choose the most commonly used enharmonic spelling
     new_pitch = new_pitch.simplifyEnharmonic(mostCommon=True)
@@ -218,23 +219,19 @@ def generate_note_from_pitch(old_pitch, note, low, high):
     return new_note
 
 
-def clean_copy_element(element, note, low, high):
+def clean_copy_element(element,
+                       interval_note, interval_low, interval_high):
     """Safely and cleanly copy a note or rest."""
 
-    if element.isNote:
-        new_element = generate_note_from_pitch(element.pitch,
-                                               note,
-                                               low,
-                                               high)
-    elif element.isChord:
+    if element.isNote or element.isChord:
         new_element = generate_note_from_pitch(element.pitches[0],
-                                               note,
-                                               low,
-                                               high)
+                                               interval_note,
+                                               interval_low,
+                                               interval_high)
     elif element.isRest:
         new_element = mc.note.Rest()
 
-    new_element.quarterLength = element.quarterLength
+    new_element.duration = element.duration
     new_element.offset = element.offset
 
     return new_element
@@ -359,6 +356,7 @@ def main():
                         default=DEFAULT_CLEF)
     parser.add_argument('--voice_num',
                         metavar='1-32',
+                        type=int,
                         help='converts to this number of parts',
                         choices=range(1, 32),
                         default=VOICE_NUM)
@@ -370,11 +368,11 @@ def main():
                              'per voice (0.0 - 1.0)',
                         default=VOICE_DISTRIBUTION)
     parser.add_argument('--quantization',
-                        metavar='1-6',
+                        metavar='1-16',
                         nargs='+',
                         type=int,
                         help='quantize MIDI grid values',
-                        choices=range(1, 6),
+                        choices=range(1, 16),
                         default=QUANTIZATION)
     parser.add_argument('--part_ratio',
                         metavar='0.0-1.0',
@@ -430,6 +428,7 @@ def main():
         score.quantize(quantization,
                        processOffsets=True,
                        processDurations=True,
+                       recurse=True,
                        inPlace=True)
 
         # Clean up
@@ -537,10 +536,10 @@ def main():
         new_score.makeNotation(inPlace=True)
 
         new_measures_total = max_measures(new_score)
-        print('Generated score with {} measures. '
-              'Data augmentation of {}%!'.format(
+        print('Generated score with {0} measures. '
+              'Data augmentation of {1:.0%}!'.format(
                   new_measures_total,
-                  ((new_measures_total / measures_total) - 1) * 100))
+                  ((new_measures_total / measures_total) - 1)))
 
         # Write result to MIDI file
         new_file_path = common.make_file_path(file_path,
