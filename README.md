@@ -1,6 +1,16 @@
 # midi-orchestra
 
-Useful scripts for pre-processing, splitting or evaluating MIDI files for machine learning purposes and dataset generation.
+Scripts for pre-processing, splitting or evaluating MIDI files for machine learning purposes and dataset generation.
+
+## Example
+
+1. Take a complex, multipart orchestra MIDI score, transform the score into monophonic, separate voices via `separate-midi.py`.
+
+2. Split the score into smaller parts of x seconds for faster processing via `split-midi.py`.
+
+3. Quantize, convert time signature, transpose all notes within a defined interval and reduce the score to only y voices without loosing any information (all possible part combinations get added up, augmenting the dataset) via `preprocess-midi.py`.
+
+4. Visualize the results as piano roll diagrams via `visualize-midi.py`.
 
 ## Installation
 
