@@ -56,7 +56,7 @@ def is_invalid_file(file_path):
     """Check if file is a valid MIDI document."""
 
     if not os.path.isfile(file_path):
-        print('Warning: "{}" could not be found or is a folder '
+        print('Warning: "{}" could not be found or is a folder. '
               'Ignore it!\n'.format(file_path))
         return True
 
