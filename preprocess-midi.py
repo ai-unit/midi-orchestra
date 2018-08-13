@@ -317,6 +317,16 @@ def traverse_combination_tree(tree, single_combination=[], result=[], depth=0):
     return result
 
 
+warnings = []
+
+
+def print_warning(text, file_path):
+    """Print a warning message to the user and store it for summary."""
+
+    print('Warning: {}\n'.format(text))
+    warnings.append([text, file_path])
+
+
 def main():
     """User interface."""
 
@@ -349,8 +359,7 @@ def main():
     parser.add_argument('--time_signature',
                         metavar='4/4',
                         type=str,
-                        help='converts score to given time signature',
-                        default=DEFAULT_TIME_SIGNATURE)
+                        help='converts score to given time signature')
     parser.add_argument('--valid',
                         metavar='3/4',
                         nargs='*',
@@ -392,13 +401,18 @@ def main():
 
     default_bpm = args.bpm
     default_instrument = args.instrument
-    default_time_signature = args.time_signature
     interval_high = args.interval_high
     interval_low = args.interval_low
     score_part_ratio = args.part_ratio
     target_folder_path = args.target_folder
     voice_distribution = args.voice_distribution
     voice_num = args.voice_num
+
+    if args.time_signature:
+        default_time_signature = [
+            int(i) for i in args.time_signature.split('/')]
+    else:
+        default_time_signature = DEFAULT_TIME_SIGNATURE
 
     if args.valid:
         valid_time_signatures = []
@@ -437,6 +451,13 @@ def main():
         score.remove_invalid_notes()
         print('Loaded "{}".'.format(file_path))
 
+        if get_end_time(score,
+                        default_bpm,
+                        default_time_signature) == 0.0:
+            print_warning('Original score is too short! Stop here.',
+                          file_path)
+            continue
+
         # Remove invalid time signatures
         temp_score = filter_time_signatures(score,
                                             valid_time_signatures,
@@ -447,7 +468,8 @@ def main():
         remove_sparse_parts(temp_score, score_part_ratio)
 
         if len(temp_score.instruments) < voice_num:
-            print('Warning: Too little voices given! Stop here.\n')
+            print_warning('Too little voices given! Stop here.',
+                          file_path)
             continue
 
         # Identify ambitus group for every instrument
@@ -478,6 +500,12 @@ def main():
                                      default_bpm,
                                      default_time_signature)
 
+        if temp_end_time < 1.0:
+            print_warning('Score is very short, '
+                          'maybe due to time signature '
+                          'filtering. Skip this!', file_path)
+            continue
+
         new_score.time_signature_changes = [midi.TimeSignature(
             numerator=default_time_signature[0],
             denominator=default_time_signature[1],
@@ -505,9 +533,9 @@ def main():
         new_end_time = get_end_time(new_score,
                                     default_bpm,
                                     default_time_signature)
-        print('Generated score with duration {0:.4} seconds. '
+        print('Generated score with duration {0} seconds. '
               'Data augmentation of {1:.0%}!'.format(
-                  new_end_time,
+                  round(new_end_time),
                   ((new_end_time / temp_end_time) - 1)))
 
         # Write result to MIDI file
@@ -518,6 +546,12 @@ def main():
         new_score.write(new_file_path)
 
         print('Saved MIDI file at "{}".'.format(new_file_path))
+        print('')
+
+    if len(warnings) > 0:
+        print('Warnings given:')
+        for warning in warnings:
+            print('* "{}" in "{}".'.format(warning[0], warning[1]))
         print('')
 
     print('Done!')
