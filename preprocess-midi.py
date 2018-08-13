@@ -1,72 +1,162 @@
 import argparse
 import math
 
-import music21 as mc
 import numpy as np
+import pretty_midi as midi
 
 import common
 
 
 # Transpose all notes between this range
-INTERVAL_NOTE = 'C'
-INTERVAL_LOW = 3
-INTERVAL_HIGH = 5
+INTERVAL_LOW = 32
+INTERVAL_HIGH = 72
 
 # Use these parameters for every part of the score
-DEFAULT_TIME_SIGNATURE = '4/4'
-DEFAULT_INSTRUMENT = 'piano'
-DEFAULT_CLEF = 'treble'
-
-# Quantize MIDI data before processing
-QUANTIZATION = [4, 3]
+DEFAULT_BPM = 120
+DEFAULT_INSTRUMENT = 'Acoustic Grand Piano'
+DEFAULT_TIME_SIGNATURE = (3, 4)
 
 # How many parts our output will contain
-VOICE_NUM = 5
+VOICE_NUM = 4
 
 # How should the parts be distributed in %
-VOICE_DISTRIBUTION = [0.1, 0.2, 0.3, 0.2, 0.2]
+VOICE_DISTRIBUTION = [0.2, 0.3, 0.3, 0.2]
 
 # Parts with less than x percent of all notes get removed
-SCORE_PART_RATIO = 0.015
+SCORE_PART_RATIO = 0.05
+
+# Keep measures with these time signatures, remove other
+VALID_TIME_SIGNATURES = [DEFAULT_TIME_SIGNATURE, (6, 8)]
 
 
-def identify_instrument_name(stream):
-    """Returns the instrument name of this part."""
+def get_end_time(score, bpm, time_signature):
+    """Gets the normalized duration of a score."""
 
-    instruments = stream.getElementsByClass(mc.instrument.Instrument)
-    if len(instruments) > 0 and instruments[0].instrumentName is not None:
-        return instruments[0].instrumentName
-    return 'Undefined'
+    # Get the score end time in seconds
+    end_time = math.ceil(score.get_end_time() * 10) / 10
+
+    # Calculate how long a measure is in seconds
+    beat_time = midi.qpm_to_bpm(60 / bpm, time_signature[0], time_signature[1])
+    measure_time = beat_time * time_signature[0]
+
+    # Normalize the end time to a well formed measure
+    end_time = end_time + (end_time % measure_time)
+
+    return end_time
+
+
+def copy_note(note, offset=0):
+    """Safely make a new note instance."""
+
+    return midi.Note(pitch=note.pitch,
+                     start=note.start + offset,
+                     end=note.end + offset,
+                     velocity=note.velocity)
+
+
+def filter_time_signatures(score, valid_time_signatures, bpm, time_signature):
+    """Filters notes by time signature."""
+
+    original_end_time = get_end_time(score, bpm, time_signature)
+
+    # Detect times with correct time signatures
+    valid_times = []
+    valid_time = []
+
+    for signature in score.time_signature_changes:
+        is_valid_signature = False
+
+        for valid_signature in valid_time_signatures:
+            if (signature.numerator == valid_signature[0] and
+                    signature.denominator == valid_signature[1]):
+                is_valid_signature = True
+                print('Found {}.'.format(signature))
+
+        if is_valid_signature:
+            if len(valid_time) == 1:
+                # Ignore this valid signature since we already have one.
+                continue
+
+            if len(valid_time) == 2:
+                # This is already full, save it!
+                valid_times.append(valid_time)
+
+            # Keep the start time of this valid time period
+            valid_time = [signature.time]
+
+        else:
+            # This is the end of a valid period
+            if len(valid_time) == 1:
+                valid_times.append([valid_time[0], signature.time])
+                valid_time = []
+
+    if len(valid_time) == 1:
+        valid_times.append([valid_time[0], original_end_time])
+
+    print('Total {} valid time frame(s).'.format(len(valid_times)))
+
+    # Create a new score with only valid time signatures
+    new_score = midi.PrettyMIDI(initial_tempo=bpm)
+
+    for instrument in score.instruments:
+        new_instrument = midi.Instrument(program=instrument.program)
+        for note in instrument.notes:
+            offset = 0
+            for valid_time in valid_times:
+                offset += valid_time[0]
+                if not (note.end <= valid_time[0] or
+                        note.start >= valid_time[1]):
+                    new_instrument.notes.append(copy_note(note, -offset))
+        new_score.instruments.append(new_instrument)
+
+    end_time = get_end_time(new_score, bpm, time_signature)
+    print('New score has a length of {0:.4} seconds '
+          '(original was {1:.4} seconds).'.format(
+              end_time, original_end_time))
+
+    if end_time / original_end_time < 0.1:
+        print('Warning: A large part of the original score was removed!')
+
+    return new_score
 
 
 def remove_sparse_parts(score, ratio):
     """Remove parts which are too sparse."""
 
-    original_parts_count = len(score)
-    original_notes_count = len(score.flat.notes)
+    original_instruments_count = len(score.instruments)
+    original_notes_count = 0
+    for instrument in score.instruments:
+        original_notes_count += len(instrument.notes)
+
     removed_instruments = []
 
-    for part in score:
-        part_notes_count = len(part.flat.notes)
-        if part_notes_count == 0:
-            part_score_ratio = 0
+    for instrument_index, instrument in enumerate(score.instruments):
+        instrument_notes_count = len(instrument.notes)
+        if instrument_notes_count == 0:
+            instrument_score_ratio = 0
         else:
-            part_score_ratio = (part_notes_count / original_notes_count)
+            instrument_score_ratio = (
+                instrument_notes_count / original_notes_count)
 
-        name = identify_instrument_name(part)
+        ratio_str = ''
+        for i in range(math.ceil(instrument_score_ratio * 100)):
+            ratio_str += '='
 
-        print('Part "{0}" with a note ratio score of {1:.2%}'.format(
-            name, part_score_ratio))
+        print('Part #{0:03d} score: {1:6.2%} {2}'.format(
+            instrument_index + 1,
+            instrument_score_ratio,
+            ratio_str))
 
-        if part_score_ratio < ratio:
-            removed_instruments.append(name)
-            score.remove(part)
+        if instrument_score_ratio < ratio:
+            removed_instruments.append(instrument_index)
 
-    print('Removed {} part(s): {}, now {} given (original had {}).'.format(
-        original_parts_count - len(score),
-        removed_instruments,
-        len(score),
-        original_parts_count))
+    for instrument_index in reversed(removed_instruments):
+        del score.instruments[instrument_index]
+
+    print('Removed {} part(s), now {} given (original had {}).'.format(
+        original_instruments_count - len(score.instruments),
+        len(score.instruments),
+        original_instruments_count))
 
 
 def identify_ambitus_groups(score, voice_num, voice_distribution):
@@ -75,17 +165,20 @@ def identify_ambitus_groups(score, voice_num, voice_distribution):
     print('Identify ambitus groups for all score parts ..')
 
     # 1. Analyze ambitus for every part
-    part_intervals = []
-    for part_index, part in enumerate(score):
-        interval = mc.analysis.discrete.Ambitus().getSolution(part)
-        part_intervals.append([part_index,
-                               interval.noteStart.diatonicNoteNum,
-                               interval.noteEnd.diatonicNoteNum])
+    instrument_intervals = []
+    for instrument_index, instrument in enumerate(score.instruments):
+        pitches = []
+        for note in instrument.notes:
+            pitches.append(note.pitch)
+
+        instrument_intervals.append([instrument_index,
+                                     min(pitches),
+                                     max(pitches)])
 
     # 2. Identify minimum and maximum ambitus over all parts
-    part_intervals = np.array(part_intervals)
-    interval_min = np.min(part_intervals[:, 1])
-    interval_max = np.max(part_intervals[:, 2])
+    instrument_intervals = np.array(instrument_intervals)
+    interval_min = np.min(instrument_intervals[:, 1])
+    interval_max = np.max(instrument_intervals[:, 2])
     print('Score ambitus is {} - {} (min - max)!'.format(interval_min,
                                                          interval_max))
 
@@ -99,28 +192,31 @@ def identify_ambitus_groups(score, voice_num, voice_distribution):
         range_min = interval_min + (interval_slice * voice_index) + 1
         range_max = interval_min + (
             interval_slice * voice_index) + interval_slice
-        for part_interval in part_intervals:
-            part_index, part_min, part_max = part_interval
-            closeness = abs(range_min - part_min) + abs(range_max - part_max)
+        for interval in instrument_intervals:
+            instrument_index, instrument_min, instrument_max = interval
+            closeness = abs(range_min - instrument_min) + abs(
+                range_max - instrument_max)
             closeness = 1 - (closeness / (interval_total * 2))
-            scores.append([part_index,
+            scores.append([instrument_index,
                            voice_index,
                            closeness])
 
     # 4. Group parts based on closeness
-    part_groups = []
+    instrument_groups = []
     groups_count = [0 for i in range(0, voice_num)]
 
-    for part_interval in part_intervals:
+    for interval in instrument_intervals:
         # Filter all closeness scores belonging to this part ...
-        part_index = part_interval[0]
-        part_scores = list(filter(lambda i: i[0] == part_index, scores))
+        instrument_index = interval[0]
+        instrument_scores = list(filter(lambda i: i[0] == instrument_index,
+                                        scores))
         # ... sort them ...
-        part_scores = sorted(part_scores, key=lambda i: i[2], reverse=True)
+        instrument_scores = sorted(instrument_scores, key=lambda i: i[2],
+                                   reverse=True)
         # ... and take the group with the best score.
-        group_index = part_scores[0][1]
+        group_index = instrument_scores[0][1]
         find_direction = True
-        while (groups_count[group_index] / len(part_intervals)
+        while (groups_count[group_index] / len(instrument_intervals)
                > voice_distribution[group_index]):
             # Change group index when first choice was too full
             if group_index == voice_num - 1:
@@ -129,7 +225,7 @@ def identify_ambitus_groups(score, voice_num, voice_distribution):
                 find_direction = True
             group_index += 1 if find_direction else -1
 
-        part_groups.append(group_index)
+        instrument_groups.append(group_index)
         groups_count[group_index] += 1
 
     groups_count = np.array(groups_count)
@@ -138,16 +234,37 @@ def identify_ambitus_groups(score, voice_num, voice_distribution):
     while len(np.where(groups_count == 0)[0]) > 0:
         empty_group_index = np.where(groups_count == 0)[0][0]
         full_group_index = np.argmax(groups_count)
-        part_index = np.argwhere(part_groups == full_group_index).flatten()[0]
-        part_groups[part_index] = empty_group_index
+        instrument_index = np.argwhere(
+            instrument_groups == full_group_index).flatten()[0]
+        instrument_groups[instrument_index] = empty_group_index
         groups_count[empty_group_index] += 1
         groups_count[full_group_index] -= 1
         print('Empty group {} detected, fill it up with part {}!'.format(
-            empty_group_index, part_index))
+            empty_group_index, instrument_index))
 
-    print('Parts in groups:', part_groups)
+    print('Parts in groups:', instrument_groups)
 
-    return np.array(part_groups)
+    return np.array(instrument_groups)
+
+
+def transpose(score, interval_min, interval_max):
+    """Transpose all notes within a given interval."""
+
+    for instrument in score.instruments:
+        for note in instrument.notes:
+            normalized_pitch = note.pitch % 12
+            if note.pitch > interval_max:
+                normalized_interval = interval_max % 12
+                new_pitch = interval_max - normalized_interval - (
+                    12 - normalized_pitch)
+            elif note.pitch < interval_min:
+                normalized_interval = interval_min % 12
+                new_pitch = interval_min + (
+                    normalized_interval + normalized_pitch)
+            else:
+                new_pitch = note.pitch
+
+            note.pitch = new_pitch
 
 
 def create_combination_tree(options, group_index):
@@ -200,115 +317,8 @@ def traverse_combination_tree(tree, single_combination=[], result=[], depth=0):
     return result
 
 
-def generate_note_from_pitch(old_pitch,
-                             interval_note, interval_low, interval_high):
-    """Take a pitch object, transpose and generate a new note from it."""
-
-    # Fit within interval range
-    new_pitch = old_pitch.transposeAboveTarget(
-        mc.pitch.Pitch(name=interval_note, octave=interval_low))
-    new_pitch = new_pitch.transposeBelowTarget(
-        mc.pitch.Pitch(name=interval_note, octave=interval_high))
-
-    # Choose the most commonly used enharmonic spelling
-    new_pitch = new_pitch.simplifyEnharmonic(mostCommon=True)
-
-    new_note = mc.note.Note(name=new_pitch.name,
-                            octave=new_pitch.octave)
-
-    return new_note
-
-
-def clean_copy_element(element,
-                       interval_note, interval_low, interval_high):
-    """Safely and cleanly copy a note or rest."""
-
-    if element.isNote or element.isChord:
-        new_element = generate_note_from_pitch(element.pitches[0],
-                                               interval_note,
-                                               interval_low,
-                                               interval_high)
-    elif element.isRest:
-        new_element = mc.note.Rest()
-
-    new_element.duration = element.duration
-    new_element.offset = element.offset
-
-    return new_element
-
-
-def create_default_part(instrument, time_signature, clef, is_first=False):
-    """Creates a default part."""
-
-    part = mc.stream.Part()
-
-    # Set default instrument and clef
-    part.insert(0, mc.instrument.fromString(instrument))
-    part.insert(0, mc.clef.clefFromString(clef))
-
-    # Only give time signature info for first track (MIDI standard)
-    if is_first:
-        part.insert(0, mc.meter.TimeSignature(time_signature))
-
-    return part
-
-
-def clean_copy_measure(measure, relative_measure_index, duration,
-                       note, low, high):
-    """Cleanly creates a new measure based on given one."""
-
-    new_measure = mc.stream.Measure()
-    new_measure.leftBarline = (
-        'light-light' if relative_measure_index == 1 else None)
-    new_measure.rightBarline = None
-
-    if measure is not None:
-        # Add all notes and rests from given measure
-        for element in measure.notesAndRests:
-            new_measure.append(clean_copy_element(element,
-                                                  note,
-                                                  low,
-                                                  high))
-    else:
-        # Insert full rest if given measure does not exist
-        new_rest = mc.note.Rest()
-        new_rest.duration = duration
-        new_measure.append(new_rest)
-
-    return new_measure
-
-
-def count_measures(part):
-    """Returns the number of measures in given part."""
-
-    return len(part.getElementsByClass(mc.stream.Measure))
-
-
-def max_measures(score):
-    """Find part with the highest amount of measures."""
-
-    return max([count_measures(part) for part in score])
-
-
 def main():
-    """
-    User interface.
-
-    For machine learning applications we are interested in
-    preprocessing MIDI files of different orchestra works
-    into a simplified, standardized format:
-
-    * Quantize notes
-    * Transpose all notes (octaves) within a fixed range
-    * Convert parts to one time signature
-    * Remove parts which are too sparse
-    * Reduce all parts to a fixed number
-
-    Through part reduction we deal with unused material,
-    we use this material to generate new score material,
-    changing the original score but keeping the "style"
-    of the composition.
-    """
+    """User interface."""
 
     parser = argparse.ArgumentParser(
         description='Preprocess (quantize, simplify, merge ..) and augment '
@@ -324,42 +334,44 @@ def main():
                         help='folder path where '
                              'generated results are stored',
                         default=common.DEFAULT_TARGET_FOLDER)
-    parser.add_argument('--interval_note',
-                        metavar='note',
-                        help='base note for transpose interval',
-                        choices=['C', 'D', 'E', 'F', 'G', 'A', 'B'],
-                        default=INTERVAL_NOTE)
     parser.add_argument('--interval_low',
-                        metavar='0-8',
+                        metavar='0-127',
                         type=int,
                         help='lower end of transpose interval',
-                        choices=range(0, 8),
+                        choices=range(0, 127),
                         default=INTERVAL_LOW)
     parser.add_argument('--interval_high',
-                        metavar='0-8',
+                        metavar='0-127',
                         help='higher end of transpose interval',
                         type=int,
-                        choices=range(0, 8),
+                        choices=range(0, 127),
                         default=INTERVAL_HIGH)
     parser.add_argument('--time_signature',
                         metavar='4/4',
                         type=str,
                         help='converts score to given time signature',
                         default=DEFAULT_TIME_SIGNATURE)
+    parser.add_argument('--valid',
+                        metavar='3/4',
+                        nargs='*',
+                        type=str,
+                        help='keep these time signatures, remove others')
     parser.add_argument('--instrument',
                         metavar='name',
                         help='converts parts to given instrument',
                         default=DEFAULT_INSTRUMENT)
-    parser.add_argument('--clef',
-                        metavar='treble',
-                        help='converts parts to given clef',
-                        default=DEFAULT_CLEF)
     parser.add_argument('--voice_num',
                         metavar='1-32',
                         type=int,
                         help='converts to this number of parts',
                         choices=range(1, 32),
                         default=VOICE_NUM)
+    parser.add_argument('--bpm',
+                        metavar='1-320',
+                        type=int,
+                        help='global tempo of score',
+                        choices=range(1, 320),
+                        default=DEFAULT_BPM)
     parser.add_argument('--voice_distribution',
                         metavar='0.0-1.0',
                         nargs='+',
@@ -367,13 +379,6 @@ def main():
                         help='defines maximum size of alternative options '
                              'per voice (0.0 - 1.0)',
                         default=VOICE_DISTRIBUTION)
-    parser.add_argument('--quantization',
-                        metavar='1-16',
-                        nargs='+',
-                        type=int,
-                        help='quantize MIDI grid values',
-                        choices=range(1, 16),
-                        default=QUANTIZATION)
     parser.add_argument('--part_ratio',
                         metavar='0.0-1.0',
                         type=common.restricted_float,
@@ -385,21 +390,30 @@ def main():
 
     file_paths = common.get_files(args.files)
 
-    default_clef = args.clef
+    default_bpm = args.bpm
     default_instrument = args.instrument
     default_time_signature = args.time_signature
     interval_high = args.interval_high
     interval_low = args.interval_low
-    interval_note = args.interval_note
-    quantization = args.quantization
     score_part_ratio = args.part_ratio
     target_folder_path = args.target_folder
     voice_distribution = args.voice_distribution
     voice_num = args.voice_num
 
+    if args.valid:
+        valid_time_signatures = []
+        for signature in args.valid:
+            if '/' in signature:
+                valid_time_signatures.append(
+                    [int(i) for i in signature.split('/')])
+            else:
+                common.print_error('Error: Invalid time signature!')
+    else:
+        valid_time_signatures = VALID_TIME_SIGNATURES
+
     # Do some health checks before we start
-    if interval_high < interval_low:
-        common.print_error('Error: Interval range is smaller than 0!')
+    if interval_high - interval_low < 12:
+        common.print_error('Error: Interval range is smaller than an octave!')
 
     test = 1.0 - np.sum(voice_distribution)
     if test > 0.001 or test < 0:
@@ -417,42 +431,37 @@ def main():
 
         # Import MIDI file
         print('➜ Import file at "{}" ..'.format(file_path))
-        score = mc.converter.parse(file_path)
 
-        if len(score.flat.notesAndRests) > 10000:
-            print('Warning: This is a rather large MIDI file and might '
-                  'take some time to process!')
+        # Read MIDi file and clean up
+        score = midi.PrettyMIDI(file_path)
+        score.remove_invalid_notes()
+        print('Loaded "{}".'.format(file_path))
 
-        # Quantize MIDI data
-        print('Quantize ..')
-        score.quantize(quantization,
-                       processOffsets=True,
-                       processDurations=True,
-                       recurse=True,
-                       inPlace=True)
+        # Remove invalid time signatures
+        temp_score = filter_time_signatures(score,
+                                            valid_time_signatures,
+                                            default_bpm,
+                                            default_time_signature)
 
-        # Clean up
-        print('Remove sparse parts ..')
-        remove_sparse_parts(score,
-                            score_part_ratio)
+        # Remove sparse instruments
+        remove_sparse_parts(temp_score, score_part_ratio)
 
-        # Check if we still have enough parts to go on
-        if len(score) < voice_num:
-            print(
-                'Warning: Less parts than needed voices! '
-                'Cancel process here!')
-            print('')
+        if len(temp_score.instruments) < voice_num:
+            print('Warning: Too little voices given! Stop here.\n')
             continue
 
-        # Identify ambitus group for every part
-        part_groups = identify_ambitus_groups(score,
-                                              voice_num,
-                                              voice_distribution)
+        # Identify ambitus group for every instrument
+        groups = identify_ambitus_groups(temp_score,
+                                         voice_num,
+                                         voice_distribution)
+
+        # Transpose within an interval
+        transpose(temp_score, interval_low, interval_high)
 
         # Check which parts we can combine
         combination_options = []
         for group_index in range(0, voice_num):
-            options = np.argwhere(part_groups == group_index).flatten()
+            options = np.argwhere(groups == group_index).flatten()
             combination_options.append(options)
             print('Parts {} in group {} (size = {}).'.format(
                 options, group_index, len(options)))
@@ -463,93 +472,50 @@ def main():
 
         print('Found {} possible combinations.'.format(len(combinations)))
 
-        # Prepare temporary score
-        temp_score = mc.stream.Score()
-
-        # Convert all parts of score to new score
-        for part_index, part in enumerate(score):
-            new_part = create_default_part(default_instrument,
-                                           default_time_signature,
-                                           default_clef,
-                                           is_first=(part_index == 0))
-
-            # Get group this part belongs to
-            group_index = part_groups[part_index]
-
-            # Get instrument name for this part for debugging
-            instrument_name = identify_instrument_name(part)
-            print('Convert part "{}" in group {} with {} notes.'.format(
-                instrument_name, group_index, len(part.flat.notes)))
-
-            # Convert notes and rests
-            for element in part.flat.notesAndRests:
-                new_part.append(clean_copy_element(element,
-                                                   interval_note,
-                                                   interval_low,
-                                                   interval_high))
-
-            temp_score.insert(0, new_part)
-
-        print('Finalize temporary score ..')
-        temp_score.makeNotation(inPlace=True)
-        print('Done with temporary score!')
-
-        # Calculate longest part in measures
-        measures_total = max_measures(temp_score)
-        measure_duration = temp_score[0].measure(1).barDuration
-        print('Longest part has {} measures (length = {} quarters).'.format(
-            measures_total,
-            measure_duration.quarterLength))
-
         # Prepare a new score with empty parts for every voice
-        new_score = mc.stream.Score()
+        new_score = midi.PrettyMIDI(initial_tempo=default_bpm)
+        temp_end_time = get_end_time(temp_score,
+                                     default_bpm,
+                                     default_time_signature)
+
+        new_score.time_signature_changes = [midi.TimeSignature(
+            numerator=default_time_signature[0],
+            denominator=default_time_signature[1],
+            time=0.0)]
+
         for i in range(0, voice_num):
-            new_part = create_default_part(default_instrument,
-                                           default_time_signature,
-                                           default_clef,
-                                           is_first=(i == 0))
-            new_score.insert(0, new_part)
+            program = midi.instrument_name_to_program(default_instrument)
+            new_instrument = midi.Instrument(program=program)
+            new_score.instruments.append(new_instrument)
 
         # Add parts in all possible combinations
         for combination_index, combination in enumerate(combinations):
-            for relative_measure_index in range(1, measures_total + 1):
-                measure_index = relative_measure_index + (
-                    combination_index * measures_total)
-                offset = measure_duration.quarterLength * (measure_index - 1)
-                for part_index, temp_part_index in enumerate(
-                        reversed(combination)):
-                    measure = temp_score[temp_part_index].measure(
-                        relative_measure_index)
-                    new_score[part_index].insert(
-                        offset,
-                        clean_copy_measure(measure,
-                                           relative_measure_index,
-                                           measure_duration,
-                                           interval_note,
-                                           interval_low,
-                                           interval_high))
-            print('Generated combination {} #{}.'.format(
-                combination, combination_index + 1))
+            offset = combination_index * temp_end_time
+            for instrument_index, temp_instrument_index in enumerate(
+                    reversed(combination)):
+                for note in temp_score.instruments[
+                        temp_instrument_index].notes:
+                    new_score.instruments[instrument_index].notes.append(
+                        copy_note(note, offset))
 
-        # Finalize!
-        print('Finalize score ..')
-        new_score.makeNotation(inPlace=True)
+            print('Generated combination #{0:03d}: {1}'.format(
+                combination_index + 1, combination))
 
-        new_measures_total = max_measures(new_score)
-        print('Generated score with {0} measures. '
+        # Done!
+        new_end_time = get_end_time(new_score,
+                                    default_bpm,
+                                    default_time_signature)
+        print('Generated score with duration {0:.4} seconds. '
               'Data augmentation of {1:.0%}!'.format(
-                  new_measures_total,
-                  ((new_measures_total / measures_total) - 1)))
+                  new_end_time,
+                  ((new_end_time / temp_end_time) - 1)))
 
         # Write result to MIDI file
         new_file_path = common.make_file_path(file_path,
                                               target_folder_path,
                                               suffix='processed')
 
-        file = mc.midi.translate.streamToMidiFile(new_score)
-        file.open(new_file_path, 'wb')
-        file.write()
-        file.close()
+        new_score.write(new_file_path)
 
         print('Saved MIDI file at "{}".'.format(new_file_path))
         print('')

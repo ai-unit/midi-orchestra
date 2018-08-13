@@ -1,6 +1,5 @@
 librosa==0.6.2
 matplotlib==2.2.2
-music21==5.1.0
 numpy==1.15.0
 pretty-midi==0.2.8
 scikit-learn==0.19.2
