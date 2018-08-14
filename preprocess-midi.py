@@ -114,9 +114,6 @@ def filter_time_signatures(score, valid_time_signatures, bpm, time_signature):
           '(original was {1:.4} seconds).'.format(
               end_time, original_end_time))
 
-    if end_time / original_end_time < 0.1:
-        print('Warning: A large part of the original score was removed!')
-
     return new_score
 
 
